@@ -37,7 +37,27 @@ app.get('/films/:id/recommendations', getFilmRecommendations);
 
 // ROUTE HANDLER
 function getFilmRecommendations(req, res) {
+
+	/* STEPS
+	1) Get the film ID
 	
+	2) Get film info (Genre & Release Date)
+	
+	3) Search database for films that meet Genre and Release Date criteria
+	
+	4) Get IDs of each "similar" film
+	
+	5) Ping the reviews API with the IDs of each "similar" film
+	
+	6) Get length of reviews array to see if there are at least 5 reviews; skip ones that don't have at least 5 reviews
+	
+	7) If there are 5 reviews, calculate the rating; skip the ones whose ratings are less than 4.0
+	
+	8) After the object of recommended films is created (thinking key-value pairs with their IDs as keys), iterate over the object to append the values to the response body array
+	*/
+
+
+	// Sample Expected Response
 	let response = {
 	  "recommendations" : [
 	    {
@@ -70,7 +90,7 @@ function getFilmRecommendations(req, res) {
 	    "offset": 0
 	  }
 	};
-	
+
 	res.status(200).json(response);
 }
 
