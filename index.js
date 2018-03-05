@@ -31,34 +31,11 @@ function allowCrossDomain(req, res, next) {
 
 app.use(allowCrossDomain);
 
-// Validate Parameters
-app.use(function(req, res, next) {
-	var message,
-		limit = req.query.limit,
-		offset = req.query.offset,
-		limitParsed = parseInt(req.query.limit),
-		offsetParsed = parseInt(req.query.offset);
-	
-	// Validate parameters
-	if (limit && !offset) {
-		if (Number.isNaN(limitParsed)) {
-			message = 'The limit is not a valid number.';
-			res.status(422).json({ message: message });
-		// Offset is not a number and does exist
-		} else {
-			next();
-		}
-	} else if (!limit && offset) {
-		if (Number.isNaN(offsetParsed)) {
-			message = 'The offset is not a valid number.';
-			res.status(422).json({ message: message });
-		} else {
-			next();
-		}
-	} else {
-		next();
-	}
-	
+// Produce an error if a route isn't found
+app.get('*', function(err, req, res, next) {
+	console.log(err);
+    if (err !== 404) { next(); }
+    res.status(404).json({ message: 'Not a real route, sonny' });
 });
 
 // ROUTES
@@ -89,7 +66,7 @@ function getFilmRecommendations(req, res) {
 	// LIMIT (STRING) => (INTEGER)
 	// OFFSET (STRING) => (INTEGER)
 	// I use parseInt to make it comparable to the ID in the table, which is of data type Integer
-	const filmId = req.params.id,
+	const filmId = parseInt(req.params.id, 10),
 		limit = parseInt(req.query.limit, 10) || 10,
 		offset = parseInt(req.query.offset, 10) || 0;
 
@@ -270,7 +247,6 @@ function getFilmRecommendations(req, res) {
 	}
 }
 
-// Produce correct error based on route params
 app.get('*', function(req, res) {
 	// Instantiate a new Error
 	var id = req.params.id,
@@ -289,4 +265,4 @@ app.get('*', function(req, res) {
 	res.status(status).json({ message: message });
 });
 
-module.exports = app;
+module.exports = app
