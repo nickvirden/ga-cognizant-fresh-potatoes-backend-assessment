@@ -19,7 +19,6 @@ Promise.resolve()
   .then(() => app.listen(PORT, () => console.log(`App listening on port ${PORT}`)))
   .catch((err) => { if (NODE_ENV === 'development') console.error(err.stack); });
 
-
 // CORS
 function allowCrossDomain(req, res, next) {
     if (req.method === "POST" || req.method === "OPTIONS") {
@@ -31,6 +30,13 @@ function allowCrossDomain(req, res, next) {
 };
 
 app.use(allowCrossDomain);
+
+// Produce an error if a route isn't found
+app.get('*', function(err, req, res, next) {
+	console.log(err);
+    if (err !== 404) { next(); }
+    res.status(404).json({ message: 'Not a real route, sonny' });
+});
 
 // ROUTES
 app.get('/films/:id/recommendations', getFilmRecommendations);
@@ -56,9 +62,13 @@ function getFilmRecommendations(req, res) {
 	8) After the object of recommended films is created (thinking key-value pairs with their IDs as keys), iterate over the object to append the values to the response body array
 	*/
 
-	// Get the Film ID (STRING)
+	// FILM ID (STRING) => (INTEGER)
+	// LIMIT (STRING) => (INTEGER)
+	// OFFSET (STRING) => (INTEGER)
 	// I use parseInt to make it comparable to the ID in the table, which is of data type Integer
-	const filmId = parseInt(req.params.id, 10);
+	const filmId = parseInt(req.params.id, 10),
+		limit = parseInt(req.query.limit, 10) || 10,
+		offset = parseInt(req.query.offset, 10) || 0;
 
 	// Establish a connection to the database
 	var sequelize = new Sequelize('main', null, null, {
@@ -87,7 +97,6 @@ function getFilmRecommendations(req, res) {
 					id: film.id,
 					title: film.title,
 					releaseDate: film.release_date,
-					status: film.status,
 					genre: film.genre_name
 				}
 			)
@@ -95,10 +104,9 @@ function getFilmRecommendations(req, res) {
 
 		// Find the parent film (the movie watched) and all of its children (the movies we might recommend)
 		// At this point, we can only sort by genre and the years between release dates between the parent and it's children
-		var parentFilm,
+		let parentFilm,
 			similarMovieIds = [],
-			similarMovies = [],
-			limit
+			similarMovies = [];
 		responseObject.forEach(currentFilm => {
 			// If the parent film's ID matches the requested film ID
 			if (currentFilm.id === filmId) {
@@ -143,11 +151,11 @@ function getFilmRecommendations(req, res) {
 	    	// If there's an error, send that back
 	    	if (err) { res.status(response.statusCode).json({ error: err }); }
 	    	// Otherwise, populate the movieReviews
-	    	var movieReviews = JSON.parse(body);
+	    	let movieReviews = JSON.parse(body);
 
 	    	// Once we get all of the movie reviews, we need to ensure that there are at least five reviews if we want to include it. Otherwise, we need to remove the movie from the running.
 	    	let moviesIndex = 0;
-	    	movieReviews.forEach(function(childReviewsList, index) {
+	    	movieReviews.forEach((childReviewsList, index) => {
 	    		var reviews = childReviewsList.reviews,
 	    			reviewsCount = reviews.length,
 	    			childReviewsListCurrentFilmId = childReviewsList.film_id;
@@ -172,11 +180,16 @@ function getFilmRecommendations(req, res) {
 	    				removeFromSimilarMoviesArrays(childReviewsListCurrentFilmId);
 	    			} else {
 	    				// Add the rating
-	    				similarMovies[moviesIndex]["averageRating"] = parseFloat(averageRating.toFixed(1));
+	    				similarMovies[moviesIndex]["averageRating"] = parseFloat(averageRating.toFixed(2));
 	    				// Add the review count
 	    				similarMovies[moviesIndex]["reviews"] = reviewsCount;
 	    				// Increment the moviesIndex so that it'll add the rating and review count to the next item that matches
 	    				moviesIndex += 1;
+	    				// If there's a limit and it's reached, don't pull any more records
+	    				if (!(moviesIndex < limit)) {
+	    					// Break the loop
+	    					return true;
+	    				}
 	    			}
 	    		}
 
@@ -196,9 +209,16 @@ function getFilmRecommendations(req, res) {
 
 	    	});
 
+	    	// Resize the array, follow any offset values
+	    	similarMovies = resizeAndOffset(similarMovies, limit, offset);
+
 	    	// Create response
 		    let finalResponse = {
-				recommendations: similarMovies
+				recommendations: similarMovies,
+				meta: {
+					limit: limit,
+					offset: offset
+				}
 			};
 
 			// Send response
@@ -208,6 +228,23 @@ function getFilmRecommendations(req, res) {
 	    });
 
 	});
+
+	// Resize array
+    function resizeAndOffset(arr, newSize, startPosition) {
+    	var newArray = [],
+    		arrayLength = arr.length;
+
+		// If the start position is greater than the array length, just start at 0 so as not to get an 'Index Out of Bounds' error. Otherwise, start at the offset value
+		startPosition = startPosition > arrayLength ? 0 : startPosition;
+
+		// If the limit is greater than the length of the current array, the new size should just be the same as the length of the current array. Also, we need to account for the offset, so subtract that from the newSize
+		newSize = (newSize > arrayLength ? arrayLength : newSize) - startPosition;
+
+		for (var i = 0; i < newSize; i++) {
+			newArray.push(arr[i + startPosition]);
+		}
+		return newArray;
+	}
 
 	
 
