@@ -72,44 +72,13 @@ function getFilmRecommendations(req, res) {
 		console.log('Connection has been established successfully.');
 	});
 
-	// Define Film table
-	var Films = sequelize.define('films', {
-			id: { type: Sequelize.INTEGER, primaryKey: true },
-			title: { type: Sequelize.STRING },
-			release_date: { type: Sequelize.STRING },
-			genre_id: { type: Sequelize.STRING, foreignKey: true }
-		},
-		{
-			timestamps: false,
-			classMethods: {
-				associate(models) {
-					this.hasOne(models.Genres, { foreignKey: 'id' })
-				}
-			}
-		}),
-		Genres = sequelize.define('genres', {
-			id: { type: Sequelize.INTEGER, primaryKey: true },
-			name: { type: Sequelize.STRING }
-		},
-		{
-			timestamps: false,
-			classMethods: {
-				associate(models) {
-					this.hasOne(models.Films, { foreignKey: 'genre_id' })
-				}
-			}
-		});
-
-	// Initialize empty array for responses
-	let responseObject = [];
-
 	// Query the Database for the info
 	sequelize.query(`SELECT films.id, films.title, films.release_date, films.status, genres.name as genre_name FROM genres LEFT JOIN films ON films.genre_id = genres.id ORDER BY films.id`).then(films => {
 
     	// console.log(films[0][0]);
 
     	// Get all of films and with their genre names in place of the ID
-		responseObject = films[0].map(film => {
+		let responseObject = films[0].map(film => {
 
 			// Transform the response into an object
 			return Object.assign(
@@ -127,7 +96,9 @@ function getFilmRecommendations(req, res) {
 		// Find the parent film (the movie watched) and all of its children (the movies we might recommend)
 		// At this point, we can only sort by genre and the years between release dates between the parent and it's children
 		var parentFilm,
-			similarMovies = [];
+			similarMovieIds = [],
+			similarMovies = [],
+			limit
 		responseObject.forEach(currentFilm => {
 			// If the parent film's ID matches the requested film ID
 			if (currentFilm.id === filmId) {
@@ -136,8 +107,8 @@ function getFilmRecommendations(req, res) {
 				// Find films that are both the same genre and 15 years from the current film
 				responseObject.forEach(childFilm => {
 					
-					// If the child film has the same genre as the parent film
-					if (childFilm.genre === parentFilm.genre) {
+					// If the child film has the same genre as the parent film and is not the film itself
+					if ((childFilm.genre === parentFilm.genre) && (childFilm.id !== filmId)) {
 
 						// We check the release date, too
 						var parentFilmReleaseDatePieces = parentFilm.releaseDate.split("-"),
@@ -152,34 +123,93 @@ function getFilmRecommendations(req, res) {
 						if (yearsBetweenFilms < fifteenYears) {
 							// Add the film to the list of child films that we're going to query
 							similarMovies.push(childFilm);
+							// Add the ID to an array that will be transformed into a query string of all the IDs so that we can query the movie reviews API with all the IDs at once
+							similarMovieIds.push(childFilm.id)
 						}
 					}
 				});
 			}
 		});
 
+		// Create a string out of the array
+		similarMovieIdsString = similarMovieIds.toString();
+
 		// REQUEST
 		// Get movie reviews
-		// request({
-	 //      uri: `http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a11c-5bfe914ca6c1?films=${req.params.id}`,
-	 //      method: 'GET'
-	 //    }, function (err, response, body) {
-	 //    	// If there's an error, send that back
-	 //    	if (err) { res.status(response.statusCode).json({ error: err }); }
-	 //    	// Otherwise, populate the movieReviews
-	 //    	var movieReviews = body;
-	 //    	console.log("movieReviews inside", JSON.parse(movieReviews)[0].reviews);
+		request({
+	      uri: `http://credentials-api.generalassemb.ly/4576f55f-c427-4cfc-a11c-5bfe914ca6c1?films=${similarMovieIdsString}`,
+	      method: 'GET'
+	    }, function (err, response, body) {
+	    	// If there's an error, send that back
+	    	if (err) { res.status(response.statusCode).json({ error: err }); }
+	    	// Otherwise, populate the movieReviews
+	    	var movieReviews = JSON.parse(body);
 
+	    	// Once we get all of the movie reviews, we need to ensure that there are at least five reviews if we want to include it. Otherwise, we need to remove the movie from the running.
+	    	let moviesIndex = 0;
+	    	movieReviews.forEach(function(childReviewsList, index) {
+	    		var reviews = childReviewsList.reviews,
+	    			reviewsCount = reviews.length,
+	    			childReviewsListCurrentFilmId = childReviewsList.film_id;
 
+	    		// If the movies review list doesn't have at least 5 reviews
+	    		if (reviewsCount < 5) {
+	    			removeFromSimilarMoviesArrays(childReviewsListCurrentFilmId);
+				// Otherwise, that means I can go straight to calculating the average rating of the current movie
+	    		} else {
+	    			// Store the running total
+	    			var runningTotalOfReviews = 0,
+	    				averageRating = 0;
+	    			// Get the running total by adding all of the reviews
+	    			reviews.forEach(review => {
+	    				runningTotalOfReviews += review.rating;
+	    			});
+	    			// Calculate the average rating
+	    			averageRating = runningTotalOfReviews / reviewsCount;
 
-	 //    });
+	    			// Make sure that the average rating is above 4.0. Otherwise, it needs to be removed from both arrays
+	    			if (averageRating <= 4) {
+	    				removeFromSimilarMoviesArrays(childReviewsListCurrentFilmId);
+	    			} else {
+	    				// Add the rating
+	    				similarMovies[moviesIndex]["averageRating"] = parseFloat(averageRating.toFixed(1));
+	    				// Add the review count
+	    				similarMovies[moviesIndex]["reviews"] = reviewsCount;
+	    				// Increment the moviesIndex so that it'll add the rating and review count to the next item that matches
+	    				moviesIndex += 1;
+	    			}
+	    		}
+
+	    		  ///////////////////
+				 //// FUNCTIONS ////
+				///////////////////
+			    function removeFromSimilarMoviesArrays(element) {
+			    	// Find that movie in the list of IDs
+					const index = similarMovieIds.indexOf(element);
+					// As long as it exists, remove the movie recommendation
+				    if (index !== -1) {
+				    	// I have to remove it from both arrays here so the indexes stay in sync
+				        similarMovieIds.splice(index, 1);
+				        similarMovies.splice(index, 1);
+				    }
+			    }
+
+	    	});
+
+	    	// Create response
+		    let finalResponse = {
+				recommendations: similarMovies
+			};
+
+			// Send response
+			// res.status(200).send();
+			res.status(200).json(finalResponse);
+
+	    });
 
 	});
 
 	
-
-
-
 
 	// Sample Expected Response
 	// let response = {
@@ -214,8 +244,6 @@ function getFilmRecommendations(req, res) {
 	//     "offset": 0
 	//   }
 	// };
-
-	res.status(200).json({ success: true });
 }
 
 module.exports = app;
