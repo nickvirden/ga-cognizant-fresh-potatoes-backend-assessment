@@ -31,11 +31,34 @@ function allowCrossDomain(req, res, next) {
 
 app.use(allowCrossDomain);
 
-// Produce an error if a route isn't found
-app.get('*', function(err, req, res, next) {
-	console.log(err);
-    if (err !== 404) { next(); }
-    res.status(404).json({ message: 'Not a real route, sonny' });
+// Validate Parameters
+app.use(function(req, res, next) {
+	var message,
+		limit = req.query.limit,
+		offset = req.query.offset,
+		limitParsed = parseInt(req.query.limit),
+		offsetParsed = parseInt(req.query.offset);
+	
+	// Validate parameters
+	if (limit && !offset) {
+		if (Number.isNaN(limitParsed)) {
+			message = 'The limit is not a valid number.';
+			res.status(422).json({ message: message });
+		// Offset is not a number and does exist
+		} else {
+			next();
+		}
+	} else if (!limit && offset) {
+		if (Number.isNaN(offsetParsed)) {
+			message = 'The offset is not a valid number.';
+			res.status(422).json({ message: message });
+		} else {
+			next();
+		}
+	} else {
+		next();
+	}
+	
 });
 
 // ROUTES
@@ -66,7 +89,7 @@ function getFilmRecommendations(req, res) {
 	// LIMIT (STRING) => (INTEGER)
 	// OFFSET (STRING) => (INTEGER)
 	// I use parseInt to make it comparable to the ID in the table, which is of data type Integer
-	const filmId = parseInt(req.params.id, 10),
+	const filmId = req.params.id,
 		limit = parseInt(req.query.limit, 10) || 10,
 		offset = parseInt(req.query.offset, 10) || 0;
 
@@ -245,42 +268,25 @@ function getFilmRecommendations(req, res) {
 		}
 		return newArray;
 	}
-
-	
-
-	// Sample Expected Response
-	// let response = {
-	//   "recommendations" : [
-	//     {
-	//       "id": 109,
-	//       "title": "Reservoir Dogs",
-	//       "releaseDate": "09-02-1992",
-	//       "genre": "Action",
-	//       "averageRating": 4.2,
-	//       "reviews": 202
-	//     },
-	//     {
-	//       "id": 102,
-	//       "title": "Jackie Brown",
-	//       "releaseDate": "09-15-1997",
-	//       "genre": "Action",
-	//       "averageRating": 4.1,
-	//       "reviews": 404
-	//     },
-	//     {
-	//       "id": 85,
-	//       "title": "True Romance",
-	//       "releaseDate": "09-25-1993",
-	//       "genre": "Action",
-	//       "averageRating": 4.0,
-	//       "reviews": 165098
-	//     }
-	//   ],
-	//   "meta": {
-	//     "limit": 10,
-	//     "offset": 0
-	//   }
-	// };
 }
+
+// Produce correct error based on route params
+app.get('*', function(req, res) {
+	// Instantiate a new Error
+	var id = req.params.id,
+		// The default value for the error status will be 422 since that's the majority of the cases
+		status = 422; 
+
+	// Id is not valid
+	if (Number.isNaN(id)) {
+		message = 'The id is not a valid number';
+	// Otherwise, we didn't find what they were looking for whatsoever
+	} else {
+		status = 404;
+		message = 'The route you specified doesn\'t exist';
+	}
+
+	res.status(status).json({ message: message });
+});
 
 module.exports = app;
